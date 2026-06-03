@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Search, Star, BookMarked, Zap, X } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
-import { saveVocabWord, getUserVocab } from '../../firebase/firestore'
+import { saveVocabWord, getUserVocab, updateVocabMastery, saveActivityEvent } from '../../firebase/firestore'
 import { getVocabSuggestions } from '../../services/aiService'
 import { useToast } from '../../components/ui/Toast'
 import GlassCard from '../../components/ui/GlassCard'
@@ -18,11 +18,15 @@ export default function VocabularyPage() {
   const [loading, setLoading] = useState(false)
   const [aiData, setAiData] = useState(null)
   const [showAdd, setShowAdd] = useState(false)
-  const { user, userData } = useAuth()
+  const { user, userData, refreshUserData } = useAuth()
   const toast = useToast()
 
   useEffect(() => {
-    if (user) getUserVocab(user.uid).then(setWords)
+    if (user) {
+      getUserVocab(user.uid)
+        .then(setWords)
+        .catch(err => console.error('Failed to load vocab:', err))
+    }
   }, [user])
 
   const handleLookup = async () => {
@@ -48,12 +52,24 @@ export default function VocabularyPage() {
 
   const handleSave = async () => {
     if (!aiData || !user) return
-    await saveVocabWord(user.uid, aiData)
-    setWords(prev => [{ ...aiData, id: Date.now(), masteryLevel: 0 }, ...prev])
-    toast(`"${aiData.word}" saved to vocabulary!`, 'success')
+    try {
+      await saveVocabWord(user.uid, aiData)
+      await saveActivityEvent(user.uid, 'vocab_saved', { word: aiData.word, difficulty: aiData.difficulty })
+      await refreshUserData()
+      setWords(prev => [{ ...aiData, id: Date.now(), masteryLevel: 0 }, ...prev])
+      toast(`"${aiData.word}" saved to vocabulary!`, 'success')
+    } catch (err) {
+      console.error('Failed to save word:', err)
+      toast('Failed to save word. Please try again.', 'error')
+    }
     setAiData(null)
     setNewWord('')
     setShowAdd(false)
+  }
+
+  const handleMasteryUpdate = async (wordId, newLevel) => {
+    setWords(prev => prev.map(w => w.id === wordId ? { ...w, masteryLevel: newLevel } : w))
+    await updateVocabMastery(wordId, newLevel).catch(console.error)
   }
 
   const filtered = words.filter(w => w.word?.toLowerCase().includes(search.toLowerCase()))
@@ -161,8 +177,14 @@ export default function VocabularyPage() {
                 )}
                 <div className="flex items-center gap-1 mt-3">
                   {[...Array(5)].map((_, j) => (
-                    <Star key={j} size={12}
-                      className={j < (w.masteryLevel || 0) ? 'text-yellow-400 fill-yellow-400' : 'text-white/20'} />
+                    <button
+                      key={j}
+                      onClick={() => handleMasteryUpdate(w.id, j + 1 === w.masteryLevel ? 0 : j + 1)}
+                      title={`Set mastery to ${j + 1}`}
+                    >
+                      <Star size={12}
+                        className={j < (w.masteryLevel || 0) ? 'text-yellow-400 fill-yellow-400' : 'text-white/20 hover:text-yellow-300'} />
+                    </button>
                   ))}
                   <span className="text-white/30 text-xs ml-1">Mastery</span>
                 </div>

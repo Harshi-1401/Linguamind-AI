@@ -4,7 +4,7 @@ import { Mic, MicOff, RotateCcw, Zap, Shuffle, ChevronRight, Clock } from 'lucid
 import { useSpeech } from '../../hooks/useSpeech'
 import { analyzeSpeaking } from '../../services/aiService'
 import { useAuth } from '../../context/AuthContext'
-import { saveSpeakingScore } from '../../firebase/firestore'
+import { saveSpeakingScore, saveActivityEvent } from '../../firebase/firestore'
 import GlassCard from '../../components/ui/GlassCard'
 import ProgressRing from '../../components/ui/ProgressRing'
 import Button from '../../components/ui/Button'
@@ -49,7 +49,7 @@ export default function SpeakingPage() {
   const [history, setHistory] = useState([])
   const [seconds, setSeconds] = useState(0)
   const timerRef = useRef(null)
-  const { user, userData } = useAuth()
+  const { user, userData, refreshUserData } = useAuth()
 
   const prompts = PROMPTS[difficulty]
   const currentPrompt = prompts[promptIdx % prompts.length]
@@ -94,12 +94,24 @@ export default function SpeakingPage() {
     if (!transcript.trim()) return
     setAnalyzing(true)
     try {
-      const analysis = await analyzeSpeaking(transcript, userData?.targetLanguage || 'Spanish')
+      const analysis = await analyzeSpeaking(transcript, userData?.targetLanguage || 'English')
       setResult(analysis)
       setHistory(prev => [{ prompt: currentPrompt.text, transcript, ...analysis, date: new Date().toLocaleTimeString() }, ...prev.slice(0, 4)])
-      if (user) await saveSpeakingScore(user.uid, { transcript, prompt: currentPrompt.text, ...analysis }).catch(() => {})
+      if (user) {
+        await saveSpeakingScore(user.uid, {
+          transcript,
+          prompt: currentPrompt.text,
+          ...analysis,
+        })
+        await saveActivityEvent(user.uid, 'speaking_practice', {
+          fluencyScore: analysis.fluencyScore,
+          confidenceScore: analysis.confidenceScore,
+          difficulty,
+        })
+        await refreshUserData()
+      }
     } catch {
-      setResult({ fluencyScore: 70, confidenceScore: 65, hesitations: 2, feedback: 'Analysis unavailable. Please check your Gemini API key.', tips: [] })
+      setResult({ fluencyScore: 70, confidenceScore: 65, hesitations: 2, feedback: 'Analysis unavailable.', tips: [] })
     } finally {
       setAnalyzing(false)
     }

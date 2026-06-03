@@ -5,7 +5,7 @@ import GlassCard from '../../components/ui/GlassCard'
 import Button from '../../components/ui/Button'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../components/ui/Toast'
-import { addXP } from '../../firebase/firestore'
+import { saveLessonCompletion, saveActivityEvent } from '../../firebase/firestore'
 
 const ALL_LESSONS = {
   beginner: [
@@ -126,7 +126,7 @@ export default function LearningPage() {
   const [score, setScore] = useState(0)
   const [done, setDone] = useState(false)
   const [completed, setCompleted] = useState({})
-  const { user } = useAuth()
+  const { user, refreshUserData } = useAuth()
   const toast = useToast()
 
   const lessons = ALL_LESSONS[activeLevel]
@@ -150,9 +150,29 @@ export default function LearningPage() {
       setDone(true)
       setCompleted(prev => ({ ...prev, [selected.id]: score }))
       const xpEarned = Math.round(score * (selected.xp / selected.questions.length))
+      const pct = Math.round((score / selected.questions.length) * 100)
+
       if (user) {
-        await addXP(user.uid, xpEarned).catch(() => {})
-        toast(`+${xpEarned} XP earned! 🎉`, 'success')
+        try {
+          await saveLessonCompletion(user.uid, {
+            id: selected.id,
+            title: selected.title,
+            level: activeLevel,
+            score: pct,
+            xpEarned,
+          })
+          await saveActivityEvent(user.uid, 'lesson_completed', {
+            lessonId: selected.id,
+            level: activeLevel,
+            score: pct,
+            xpEarned,
+          })
+          await refreshUserData()
+          toast(`+${xpEarned} XP earned! 🎉`, 'success')
+        } catch (err) {
+          console.error('Failed to save lesson completion:', err)
+          toast(`+${xpEarned} XP earned! 🎉`, 'success')
+        }
       }
     } else {
       setCurrent(c => c + 1)

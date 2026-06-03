@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { onAuthChange } from '../firebase/auth'
-import { getUserDocument } from '../firebase/firestore'
+import { getUserDocument, createUserDocument, updateStreak } from '../firebase/firestore'
 
 const AuthContext = createContext(null)
 
@@ -13,8 +13,19 @@ export function AuthProvider({ children }) {
     const unsub = onAuthChange(async (firebaseUser) => {
       setUser(firebaseUser)
       if (firebaseUser) {
-        const data = await getUserDocument(firebaseUser.uid)
-        setUserData(data)
+        try {
+          // Ensure user doc exists
+          await createUserDocument(firebaseUser)
+          // Update streak on every login
+          await updateStreak(firebaseUser.uid)
+          // Fetch fresh data
+          const data = await getUserDocument(firebaseUser.uid)
+          setUserData(data)
+        } catch (err) {
+          console.error('AuthContext error:', err)
+          const data = await getUserDocument(firebaseUser.uid)
+          setUserData(data)
+        }
       } else {
         setUserData(null)
       }
