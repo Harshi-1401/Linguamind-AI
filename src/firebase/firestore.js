@@ -1,6 +1,6 @@
 import {
   doc, setDoc, getDoc, collection,
-  addDoc, getDocs, query, where, limit,
+  addDoc, getDocs, query, where, limit, deleteDoc,
   serverTimestamp, increment, Timestamp, orderBy,
 } from 'firebase/firestore'
 import { db } from './firebaseConfig'
@@ -111,6 +111,94 @@ export const getChatHistory = async (uid, lang = null) => {
 export const incrementChatSession = (uid) =>
   setDoc(doc(db, 'users', uid), { chatSessions: increment(1) }, { merge: true })
 
+// ── Conversations (ChatGPT-style) ─────────────────────────────────────────────
+// Schema:
+//   users/{uid}/conversations/{convId}  → { title, lang, mode, createdAt, updatedAt, messageCount }
+//   users/{uid}/conversations/{convId}/messages/{msgId} → { role, content, ts, createdAt }
+
+export const createConversation = async (uid, { lang, mode, firstMessage }) => {
+  const title = firstMessage?.slice(0, 50) || 'New Conversation'
+  const convRef = doc(collection(db, 'users', uid, 'conversations'))
+  await setDoc(convRef, {
+    title,
+    lang: lang || 'English',
+    mode: mode || 'Casual Chat',
+    messageCount: 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  log('conv:create', `Created conversation "${title}"`, convRef.id)
+  return convRef.id
+}
+
+export const saveMessage = async (uid, convId, message) => {
+  try {
+    const msgRef = doc(collection(db, 'users', uid, 'conversations', convId, 'messages'))
+    await setDoc(msgRef, {
+      role: message.role,       // 'user' | 'ai'
+      content: message.content,
+      ts: Date.now(),
+      createdAt: serverTimestamp(),
+    })
+    // Update conversation metadata
+    await setDoc(doc(db, 'users', uid, 'conversations', convId), {
+      updatedAt: serverTimestamp(),
+      messageCount: increment(1),
+      ...(message.role === 'user' && { lastMessage: message.content.slice(0, 80) }),
+    }, { merge: true })
+    log('msg:save', `Saved ${message.role} msg in conv ${convId}`, msgRef.id)
+    return msgRef.id
+  } catch (e) {
+    err('msg:save', 'save failed', e)
+    throw e
+  }
+}
+
+export const getConversations = async (uid) => {
+  try {
+    const q = query(collection(db, 'users', uid, 'conversations'), limit(50))
+    const snap = await getDocs(q)
+    const result = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.updatedAt?.toMillis?.() || b.ts || 0) - (a.updatedAt?.toMillis?.() || a.ts || 0))
+    log('conv:load', `Loaded ${result.length} conversations`)
+    return result
+  } catch (e) {
+    err('conv:load', 'load failed', e)
+    return []
+  }
+}
+
+export const getMessages = async (uid, convId) => {
+  try {
+    const q = query(collection(db, 'users', uid, 'conversations', convId, 'messages'), limit(100))
+    const snap = await getDocs(q)
+    const result = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+    log('msg:load', `Loaded ${result.length} messages from conv ${convId}`)
+    return result
+  } catch (e) {
+    err('msg:load', 'load failed', e)
+    return []
+  }
+}
+
+export const deleteConversation = async (uid, convId) => {
+  try {
+    // Delete all messages first
+    const q = query(collection(db, 'users', uid, 'conversations', convId, 'messages'))
+    const snap = await getDocs(q)
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)))
+    // Delete conversation doc
+    await deleteDoc(doc(db, 'users', uid, 'conversations', convId))
+    log('conv:delete', `Deleted conversation ${convId}`)
+  } catch (e) {
+    err('conv:delete', 'delete failed', e)
+    throw e
+  }
+}
+
 // ── Vocabulary ────────────────────────────────────────────────────────────────
 // NO orderBy — avoids composite index. Sort client-side.
 export const saveVocabWord = async (uid, word) => {
@@ -159,6 +247,25 @@ export const updateVocabMastery = async (wordId, masteryLevel) => {
     await setDoc(doc(db, 'vocabulary_history', wordId), { masteryLevel }, { merge: true })
     log('vocab:mastery', `Set ${wordId} → ${masteryLevel}`)
   } catch (e) { err('vocab:mastery', 'update failed', e) }
+}
+
+export const deleteVocabWord = async (uid, wordId) => {
+  try {
+    await deleteDoc(doc(db, 'vocabulary_history', wordId))
+    // Decrement user counters (floor at 0)
+    const userSnap = await getDoc(doc(db, 'users', uid))
+    if (userSnap.exists()) {
+      const d = userSnap.data()
+      await setDoc(doc(db, 'users', uid), {
+        wordsLearned: Math.max(0, (d.wordsLearned || 1) - 1),
+        vocabularyMastery: Math.max(0, (d.vocabularyMastery || 2) - 2),
+      }, { merge: true })
+    }
+    log('vocab:delete', `Deleted word ${wordId}`)
+  } catch (e) {
+    err('vocab:delete', 'delete failed', e)
+    throw e
+  }
 }
 
 // ── Speaking Scores ───────────────────────────────────────────────────────────
