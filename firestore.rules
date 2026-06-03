@@ -2,44 +2,56 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users can only read/write their own document
+    // Users: read/write own document only
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // All other collections — authenticated users can only access their own data
+    // Chat history
     match /chatbot_history/{docId} {
-      allow read, write: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
 
+    // Vocabulary
     match /vocabulary_history/{docId} {
-      allow read, write: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
 
+    // Speaking scores
     match /speaking_scores/{docId} {
-      allow read, write: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
 
+    // Lesson completions
     match /lesson_completions/{docId} {
-      allow read, write: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
 
+    // Activity log
     match /activity_log/{docId} {
-      allow read, write: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
 
+    // Study plans
     match /study_plans/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Achievements
     match /achievements/{docId} {
-      allow read, write: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
   }
 }
